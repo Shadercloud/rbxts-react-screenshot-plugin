@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "downlevelIteration": true,
+    "module": "commonjs",
+    "moduleResolution": "Node",
+    "moduleDetection": "force",
+    "noLib": true,
+    "outDir": "out",
+    "rootDir": "src",
+    "strict": true,
+    "typeRoots": ["node_modules/@rbxts"]
+  },
+  "include": [
+    "src/plugin.server.ts",
+    "src/server/**/*.ts",
+    "src/types/**/*.ts",
+    "src/ui/**/*.ts",
+    "node_modules/@rbxts/types/plugin.d.ts"
+  ],
+  "exclude": ["src/bridge"]
+}

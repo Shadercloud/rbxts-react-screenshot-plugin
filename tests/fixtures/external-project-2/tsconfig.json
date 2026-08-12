@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "downlevelIteration": true,
+    "module": "commonjs",
+    "moduleResolution": "Node",
+    "moduleDetection": "force",
+    "noLib": true,
+    "strict": true,
+    "typeRoots": ["node_modules/@rbxts"]
+  }
+}

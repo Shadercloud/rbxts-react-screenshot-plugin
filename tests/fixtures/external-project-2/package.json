@@ -1,0 +1,16 @@
+{
+  "name": "external-consumer-fixture-2",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A second, independent roblox-ts project fixture - distinct from tests/fixtures/external-project - used to prove one install-plugin run serves multiple consumer projects on the same machine.",
+  "scripts": {
+    "screenshot": "react-screenshot-plugin"
+  },
+  "dependencies": {
+    "@rbxts/compiler-types": "3.0.0-types.0",
+    "@rbxts/react": "17.3.7-ts.2",
+    "@rbxts/react-roblox": "17.3.7-ts.2",
+    "@rbxts/types": "1.0.942",
+    "roblox-ts": "3.0.0"
+  }
+}

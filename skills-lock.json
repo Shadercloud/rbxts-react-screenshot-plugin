@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "isentinel": {
+      "source": "christopher-buss/skills",
+      "sourceType": "github",
+      "skillPath": "skills/isentinel/SKILL.md",
+      "computedHash": "18e0863146c362895e36dd2a8d77199b1d9c044415fe5a2fedf318b87873f302"
+    },
+    "pnpm": {
+      "source": "christopher-buss/skills",
+      "sourceType": "github",
+      "skillPath": "skills/pnpm/SKILL.md",
+      "computedHash": "57b44178faeb6a0eeb2b56d5fdea211b9107b7542b5c6a74c83ea88041286c67"
+    },
+    "roblox-ts": {
+      "source": "christopher-buss/skills",
+      "sourceType": "github",
+      "skillPath": "skills/roblox-ts/SKILL.md",
+      "computedHash": "eb79a7e8425a6babffb08e147712f27195e861ae3f50de104e59727a098cb910"
+    },
+    "test-driven-development": {
+      "source": "christopher-buss/skills",
+      "sourceType": "github",
+      "skillPath": "skills/test-driven-development/SKILL.md",
+      "computedHash": "0b09231cf8bdbccff2efdfa367a3e1162f22693636bb48ae3e690f013443727e"
+    }
+  }
+}

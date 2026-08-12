@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.bridge.json",
+  "include": [
+    "./**/*.ts",
+    "../types/**/*.ts"
+  ]
+}

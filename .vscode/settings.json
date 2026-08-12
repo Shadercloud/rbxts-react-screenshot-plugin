@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^powershell -ExecutionPolicy Bypass -File \\.specify/scripts/powershell/setup-plan\\.ps1 -Json$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    },
+    "js/ts.tsdk.path": "node_modules\\typescript\\lib"
+}

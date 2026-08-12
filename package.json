@@ -1,0 +1,50 @@
+{
+  "name": "@rbxts/react-screenshot-plugin",
+  "version": "0.1.0",
+  "description": "Capture roblox-ts React components as PNGs through Roblox Studio",
+  "private": false,
+  "bin": {
+    "react-screenshot-plugin": "dist/src/bridge/screenshot-cli.js"
+  },
+  "main": "dist/src/index.js",
+  "types": "package-types/ambient-stub.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/src",
+    "dist/roblox-src",
+    "roblox-src",
+    "package-types",
+    "plugin"
+  ],
+  "scripts": {
+    "generate:version": "node scripts/generate-version.js",
+    "build": "npm run generate:version && rbxtsc --type model",
+    "build:plugin": "npm run build && rojo build default.project.json --plugin ScreenshotPlugin.rbxm",
+    "build:release-plugin": "npm run build && node -e \"require('node:fs').mkdirSync('plugin',{recursive:true})\" && rojo build default.project.json -o plugin/ScreenshotPlugin.rbxm",
+    "clean:bridge": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build:bridge": "npm run clean:bridge && npm run generate:version && tsc -p tsconfig.bridge.json",
+    "screenshot": "npm run build:bridge && node dist/src/bridge/screenshot-cli.js",
+    "debug:build-model": "npm run build:bridge && node dist/src/bridge/debug-build-model.js",
+    "test": "npm run build:bridge && node --test \"dist/tests/unit/**/*.test.js\" \"dist/tests/integration/**/*.test.js\"",
+    "test:e2e": "npm run build:bridge && npm run build:release-plugin && node --test --test-concurrency=1 \"dist/tests/e2e/**/*.test.js\"",
+    "check": "npm run test && npm run build:bridge && npm run build:plugin && npm run build:release-plugin"
+  },
+  "devDependencies": {
+    "@rbxts/services": "latest",
+    "@types/node": "22",
+    "typescript": "5.5.3"
+  },
+  "peerDependencies": {
+    "@rbxts/compiler-types": "*",
+    "@rbxts/types": "*",
+    "@rbxts/react": "^17.3.7-ts.2",
+    "@rbxts/react-roblox": "^17.3.7-ts.2",
+    "roblox-ts": "^3.0.0"
+  }
+}
