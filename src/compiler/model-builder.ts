@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 
 import { generateBootstrapSource } from "./component-entry.js";
+import type { RgbColor } from "../capture/color.js";
 import { BOOTSTRAP_MODULE_NAME } from "../types/protocol.js";
 import type { JsonObject } from "../types/protocol.js";
 
@@ -65,6 +66,8 @@ export async function buildCaptureModel(
 	consumerProjectRoot: string = path.resolve(cwd),
 	/** Test-only hook (mirrors `runCapture`'s `onListening`): observe staging before the temp directory is cleaned up. */
 	onStaged?: (info: StagedProjectInfo) => void,
+	/** Overrides the marker wrapper's default content-backing color; defaults to it (via `generateBootstrapSource`) when omitted. */
+	contentKeyColor?: RgbColor,
 ): Promise<BuiltModel> {
 	const projectRoot = path.resolve(consumerProjectRoot);
 	const sourceEntry = path.resolve(projectRoot, componentPath);
@@ -131,7 +134,7 @@ export async function buildCaptureModel(
 
 		const componentImportPath = moduleSpecifier(path.dirname(bootstrapPath), entry);
 		const markerWrapperImportPath = moduleSpecifier(path.dirname(bootstrapPath), markerWrapperPath);
-		await writeFile(bootstrapPath, generateBootstrapSource({ componentImportPath, markerWrapperImportPath, props, temporaryRootName }));
+		await writeFile(bootstrapPath, generateBootstrapSource({ componentImportPath, markerWrapperImportPath, props, temporaryRootName, contentKeyColor }));
 
 		const placeholders = await seedOutputPaths(stagedProject, outputDirectory);
 

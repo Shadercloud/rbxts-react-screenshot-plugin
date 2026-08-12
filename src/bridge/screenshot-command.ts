@@ -6,10 +6,13 @@ import path from "node:path";
 
 import { buildCaptureModel } from "../compiler/model-builder.js";
 import { cropToMarker } from "../capture/marker-crop.js";
+import type { RgbColor } from "../capture/color.js";
 import { ensureStudioWindow as ensureStudioWindowReal, type EnsureStudioWindowOptions, type StudioWindow } from "../capture/studio-window.js";
 import { captureWindow as captureWindowReal, type WindowBounds } from "../capture/window-capture.js";
 import { createSessionServer } from "./session-server.js";
 import { SessionStore } from "./session-store.js";
+import { MARKER_COLOR } from "../../roblox-src/marker-constants.js";
+import { MARKER_TOLERANCE } from "../types/protocol.js";
 import type { JsonObject } from "../types/protocol.js";
 
 export interface RunCaptureOptions {
@@ -22,6 +25,8 @@ export interface RunCaptureOptions {
 	phaseTimeoutMs?: number;
 	/** How long to keep the listener open after a terminal state, so the plugin's next poll observes it. */
 	cleanupGraceMs?: number;
+	/** Overrides the marker wrapper's opaque content-backing color (see `CONTENT_KEY_COLOR`'s own doc comment); defaults to it when omitted. */
+	contentKeyColor?: RgbColor;
 	/** Overridable for testing; defaults to the real Win32/Studio-discovery implementations. */
 	ensureStudioWindow?: (options?: EnsureStudioWindowOptions) => Promise<StudioWindow>;
 	captureWindow?: (hwnd: string, outputPngPath: string) => Promise<WindowBounds>;
@@ -62,6 +67,15 @@ export async function runCapture(options: RunCaptureOptions): Promise<CaptureRes
 	const cleanupGraceMs = options.cleanupGraceMs ?? 2_000;
 	const ensureStudioWindowFn = options.ensureStudioWindow ?? ensureStudioWindowReal;
 	const captureWindowFn = options.captureWindow ?? captureWindowReal;
+	const contentKeyColor = options.contentKeyColor;
+	if (contentKeyColor) {
+		const tooCloseToMarker = Math.abs(contentKeyColor.r - MARKER_COLOR.r) <= MARKER_TOLERANCE
+			&& Math.abs(contentKeyColor.g - MARKER_COLOR.g) <= MARKER_TOLERANCE
+			&& Math.abs(contentKeyColor.b - MARKER_COLOR.b) <= MARKER_TOLERANCE;
+		if (tooCloseToMarker) {
+			throw new Error(`contentKeyColor is too close to the marker border color (rgb(${MARKER_COLOR.r}, ${MARKER_COLOR.g}, ${MARKER_COLOR.b})) - pick a more distinct color`);
+		}
+	}
 
 	const store = new SessionStore({ phaseTimeoutMs });
 	const server = createSessionServer(store, { port: options.port ?? 1927 });
@@ -72,7 +86,7 @@ export async function runCapture(options: RunCaptureOptions): Promise<CaptureRes
 	let sessionId: string | undefined;
 
 	try {
-		const built = await buildCaptureModel(options.componentPath, props, cwd);
+		const built = await buildCaptureModel(options.componentPath, props, cwd, undefined, undefined, contentKeyColor);
 
 		// The plugin can only discover and act on a session once its own Studio process is
 		// running, so Studio must be found or launched before the session is even advertised -
@@ -91,7 +105,7 @@ export async function runCapture(options: RunCaptureOptions): Promise<CaptureRes
 		store.markDone(session.id);
 
 		const rawPng = await readFile(rawPath);
-		const { png, contentBounds } = cropToMarker(rawPng);
+		const { png, contentBounds } = cropToMarker(rawPng, { contentKeyColor });
 		await mkdir(path.dirname(outputPath), { recursive: true });
 		await writeFile(outputPath, png);
 

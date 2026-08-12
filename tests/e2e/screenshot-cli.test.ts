@@ -18,22 +18,33 @@ import test from "node:test";
 
 import { decodePng } from "../../src/bridge/png.js";
 import { findNewestStudioExecutable, findRunningStudioWindow } from "../../src/capture/studio-window.js";
+import { isSpillTintedTowardKeyColor } from "../../src/capture/marker-crop.js";
+import type { RgbColor } from "../../src/capture/color.js";
 import { CONTENT_KEY_COLOR, MARKER_COLOR } from "../../roblox-src/marker-constants.js";
 import { MARKER_TOLERANCE } from "../../src/types/protocol.js";
 
 /**
  * Confirms the final PNG contains no trace of either wrapper color: no marker-border color (it
- * should have been fully cropped away) and no fully-opaque content-key color (it should have been
- * keyed out to transparency by cropToMarker) - the actual regression signature of the "unwrapped
- * component produces a mis-cropped/discolored PNG" bug, not just "some non-empty PNG came out".
+ * should have been fully cropped away), no fully-opaque exact content-key color (it should have been
+ * keyed out to transparency), and - the real reported bug this guards against - no opaque pixel still
+ * *tinted toward* the content key color at all, the anti-aliased fringe an exact-match-only pass used
+ * to leave behind. Only meaningful for fixtures with no genuinely key-colored-ish content of their
+ * own (true of every fixture this is used with here); a component that's legitimately spill-colored
+ * far from any edge would be a false positive for the spill check, by design (see
+ * `nibbleContentKeySpill`'s own doc comment).
  */
-function assertNoWrapperColorLeaked(decoded: { width: number; height: number; pixels: Buffer }): void {
+function assertNoWrapperColorLeaked(decoded: { width: number; height: number; pixels: Buffer }, contentKeyColor: RgbColor = CONTENT_KEY_COLOR): void {
 	for (let i = 0; i < decoded.pixels.length; i += 4) {
 		const r = decoded.pixels[i], g = decoded.pixels[i + 1], b = decoded.pixels[i + 2], a = decoded.pixels[i + 3];
 		const isMarker = Math.abs(r - MARKER_COLOR.r) <= MARKER_TOLERANCE && Math.abs(g - MARKER_COLOR.g) <= MARKER_TOLERANCE && Math.abs(b - MARKER_COLOR.b) <= MARKER_TOLERANCE;
 		assert.ok(!isMarker, `found a marker-border-colored pixel at index ${i / 4} in the final PNG`);
-		const isOpaqueContentKey = a === 255 && Math.abs(r - CONTENT_KEY_COLOR.r) <= MARKER_TOLERANCE && Math.abs(g - CONTENT_KEY_COLOR.g) <= MARKER_TOLERANCE && Math.abs(b - CONTENT_KEY_COLOR.b) <= MARKER_TOLERANCE;
+		if (a !== 255) continue;
+		const isOpaqueContentKey = Math.abs(r - contentKeyColor.r) <= MARKER_TOLERANCE && Math.abs(g - contentKeyColor.g) <= MARKER_TOLERANCE && Math.abs(b - contentKeyColor.b) <= MARKER_TOLERANCE;
 		assert.ok(!isOpaqueContentKey, `found an un-keyed opaque content-backing-colored pixel at index ${i / 4} in the final PNG`);
+		assert.ok(
+			!isSpillTintedTowardKeyColor(r, g, b, contentKeyColor),
+			`found an opaque pixel at index ${i / 4} still tinted toward the content-key color (rgb(${r}, ${g}, ${b})) - a leftover anti-aliased fringe`,
+		);
 	}
 }
 
@@ -211,6 +222,59 @@ test("capturing a component with a rounded ('pill') corner and an icon+text row 
 	const decoded = decodePng(png);
 	assert.ok(decoded.width > 0 && decoded.height > 0, `expected a real, non-empty PNG, got ${decoded.width}x${decoded.height}`);
 	assertNoWrapperColorLeaked(decoded);
+
+	await rm(outputPath, { force: true });
+});
+
+// Regression test for --content-key-color: confirms the flag actually reaches the marker wrapper
+// rendered in Studio (not just parsed and dropped), by using a key color - red - clearly unlike
+// either of ButtonLike.tsx's own rendered colors (an indigo fill, rgb(99, 102, 241), and white text) -
+// blue was tried first and rejected: the indigo fill's own blue-leaning channel balance false-positives
+// against a blue-axis spill check with nothing to do with actual key-color bleed, exactly the
+// documented false-positive risk on assertNoWrapperColorLeaked's own doc comment. If the flag weren't
+// wired all the way through, the wrapper would still back the content with the *default* green, while
+// cropToMarker would be told (wrongly) to look for red - leaving a very visible, un-keyed green fill
+// behind the button in the output. Checking BOTH that no red survives (proving the custom key was
+// fully keyed out) AND that no green survives either (proving the default wasn't silently used
+// instead) catches that failure mode either way.
+test("--content-key-color reaches the real capture and gets fully keyed out, without the default color leaking through", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+	const alreadyRunning = await findRunningStudioWindow();
+	if (!alreadyRunning && !(await findNewestStudioExecutable())) {
+		t.skip("Roblox Studio is not installed on this machine");
+		return;
+	}
+
+	const outputPath = path.join(REPO_ROOT, "tests", "fixtures", ".e2e-custom-key-color-output.png");
+	await rm(outputPath, { force: true });
+
+	const customKeyColor = { r: 255, g: 0, b: 0 };
+	const cliPath = path.join(REPO_ROOT, "dist", "src", "bridge", "screenshot-cli.js");
+	const child = spawn(
+		process.execPath,
+		[cliPath, "tests/fixtures/components/ButtonLike.tsx", "--output", outputPath, "--content-key-color", "#FF0000"],
+		{ cwd: REPO_ROOT },
+	);
+	t.signal.addEventListener("abort", () => child.kill());
+
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+	child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+	const exitCode = await new Promise<number>((resolve, reject) => {
+		child.once("error", reject);
+		child.once("exit", (code) => resolve(code ?? -1));
+	});
+
+	if (exitCode !== 0) {
+		assert.fail(`expected success capturing with a custom --content-key-color, got:\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
+	}
+
+	const png = await readFile(outputPath);
+	const decoded = decodePng(png);
+	assert.ok(decoded.width > 0 && decoded.height > 0, `expected a real, non-empty PNG, got ${decoded.width}x${decoded.height}`);
+	assertNoWrapperColorLeaked(decoded, customKeyColor);
+	assertNoWrapperColorLeaked(decoded, CONTENT_KEY_COLOR);
 
 	await rm(outputPath, { force: true });
 });

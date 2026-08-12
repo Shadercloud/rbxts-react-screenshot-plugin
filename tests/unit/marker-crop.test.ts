@@ -6,6 +6,32 @@ import { cropToMarker, MEASUREMENT_SAFETY_MARGIN } from "../../src/capture/marke
 import { decodePng, encodeRgba8Png } from "../../src/bridge/png.js";
 import { CONTENT_KEY_COLOR, MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
 
+/** Builds a raw capture with a uniform marker border and a single content color filling everything inside it, except for `overrides(contentRelativeX, contentRelativeY)` (both 0-based from the border's inner edge), used to paint a specific test pattern into the content region. */
+function buildRawCaptureWithPattern(
+	contentWidth: number,
+	contentHeight: number,
+	baseContentColor: [number, number, number],
+	overrides: (contentRelativeX: number, contentRelativeY: number) => [number, number, number] | undefined,
+): { raw: Buffer; width: number; height: number } {
+	const width = MARKER_THICKNESS * 2 + contentWidth;
+	const height = MARKER_THICKNESS * 2 + contentHeight;
+	const pixels = Buffer.alloc(width * height * 4);
+	for (let y = 0; y < height; y += 1) {
+		for (let x = 0; x < width; x += 1) {
+			const onBorder = x < MARKER_THICKNESS || width - 1 - x < MARKER_THICKNESS || y < MARKER_THICKNESS || height - 1 - y < MARKER_THICKNESS;
+			const color = onBorder
+				? [MARKER_COLOR.r, MARKER_COLOR.g, MARKER_COLOR.b]
+				: overrides(x - MARKER_THICKNESS, y - MARKER_THICKNESS) ?? baseContentColor;
+			const offset = (y * width + x) * 4;
+			pixels[offset] = color[0];
+			pixels[offset + 1] = color[1];
+			pixels[offset + 2] = color[2];
+			pixels[offset + 3] = 255;
+		}
+	}
+	return { raw: encodeRgba8Png(pixels, width, height), width, height };
+}
+
 const FIXTURES = "tests/fixtures/markers";
 const TRIM = MARKER_THICKNESS + MEASUREMENT_SAFETY_MARGIN;
 // Matches scripts/generate-marker-fixtures.js's WIDTH/HEIGHT for valid.png, color-shifted.png, and
@@ -128,6 +154,76 @@ test("content-key-colored gaps inside the cropped content are keyed out to trans
 				assert.equal(decoded.pixels[offset + 1], 20);
 				assert.equal(decoded.pixels[offset + 2], 30);
 				assert.equal(decoded.pixels[offset + 3], 255);
+			}
+		}
+	}
+});
+
+// Regression coverage for a real reported follow-up bug: even after the exact-match key-out above,
+// a visible greenish fringe remained at content edges, because Studio's own anti-aliasing blends the
+// content's true color with the opaque green backing behind it - a half-covered pixel might render as
+// a near-pure "#0DFF0D" rather than exactly "#00FF00", and a mostly-covered one as a barely-tinted
+// "#BEECC7" (both taken directly from the real reported bug). Neither is caught by the strict
+// exact-match pass, so cropToMarker now also nibbles progressively outward from each hole, removing
+// any still-opaque pixel bordering one whose color leans toward the key color - while leaving plain,
+// unrelated content (even directly adjacent to a hole, once eroded that far) untouched.
+test("a greenish anti-aliased fringe around a key-colored hole is nibbled away, but unrelated content is not", async () => {
+	const CONTENT = [10, 20, 30] as [number, number, number];
+	const { raw } = buildRawCaptureWithPattern(14, 8, CONTENT, (x) => {
+		if (x === 2) return [CONTENT_KEY_COLOR.r, CONTENT_KEY_COLOR.g, CONTENT_KEY_COLOR.b]; // pure key: exact-match hole
+		if (x === 3) return [13, 255, 13]; // "#0DFF0D": near-pure spill, one ring out
+		if (x === 4) return [190, 236, 199]; // "#BEECC7": faint spill, two rings out
+		return undefined; // x === 5 and beyond: plain content, must survive untouched
+	});
+
+	const { png, contentBounds } = cropToMarker(raw);
+	assert.deepEqual(contentBounds, { x: TRIM, y: TRIM, width: 14 - MEASUREMENT_SAFETY_MARGIN * 2, height: 8 - MEASUREMENT_SAFETY_MARGIN * 2 });
+	const decoded = decodePng(png);
+	for (let y = 0; y < decoded.height; y += 1) {
+		for (let outX = 0; outX < decoded.width; outX += 1) {
+			const offset = (y * decoded.width + outX) * 4;
+			const contentRelativeX = outX + MEASUREMENT_SAFETY_MARGIN;
+			if (contentRelativeX <= 4) {
+				assert.equal(decoded.pixels[offset + 3], 0, `expected column ${outX} (spill ladder) to be keyed out to transparent`);
+			} else {
+				assert.equal(decoded.pixels[offset], CONTENT[0]);
+				assert.equal(decoded.pixels[offset + 1], CONTENT[1]);
+				assert.equal(decoded.pixels[offset + 2], CONTENT[2]);
+				assert.equal(decoded.pixels[offset + 3], 255, `expected column ${outX} (plain content) to stay opaque`);
+			}
+		}
+	}
+});
+
+// Confirms --content-key-color's plumbing all the way into cropToMarker: content that's pure GREEN
+// (the *default* key color) must survive completely untouched when a *different* key color (blue) is
+// configured - proving the crop actually used the configured color rather than silently falling back
+// to the hardcoded default - while a blue spill ladder around a blue hole still gets nibbled exactly
+// as the default-green case above does.
+test("a custom contentKeyColor is honored end to end, including its own spill nibbling", async () => {
+	const customKey = { r: 0, g: 0, b: 255 };
+	const CONTENT = [0, 255, 0] as [number, number, number]; // deliberately the *default* key color
+	const { raw } = buildRawCaptureWithPattern(14, 8, CONTENT, (x) => {
+		if (x === 2) return [customKey.r, customKey.g, customKey.b]; // pure custom key: exact-match hole
+		if (x === 3) return [13, 13, 242]; // near-pure blue spill, one ring out
+		if (x === 4) return [199, 190, 236]; // faint blue spill, two rings out
+		return undefined; // x === 5 and beyond: plain green content, must survive untouched
+	});
+
+	const { png, contentBounds } = cropToMarker(raw, { contentKeyColor: customKey });
+	assert.deepEqual(contentBounds, { x: TRIM, y: TRIM, width: 14 - MEASUREMENT_SAFETY_MARGIN * 2, height: 8 - MEASUREMENT_SAFETY_MARGIN * 2 });
+	const decoded = decodePng(png);
+	for (let y = 0; y < decoded.height; y += 1) {
+		for (let outX = 0; outX < decoded.width; outX += 1) {
+			const offset = (y * decoded.width + outX) * 4;
+			const contentRelativeX = outX + MEASUREMENT_SAFETY_MARGIN;
+			if (contentRelativeX <= 4) {
+				assert.equal(decoded.pixels[offset + 3], 0, `expected column ${outX} (blue spill ladder) to be keyed out to transparent`);
+			} else {
+				assert.equal(decoded.pixels[offset], CONTENT[0]);
+				assert.equal(decoded.pixels[offset + 1], CONTENT[1]);
+				assert.equal(decoded.pixels[offset + 2], CONTENT[2]);
+				assert.equal(decoded.pixels[offset + 3], 255, `expected column ${outX} (plain green content) to stay opaque despite matching the default key color`);
 			}
 		}
 	}

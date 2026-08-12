@@ -2,6 +2,7 @@
 import { decodePng, encodeRgba8Png } from "../bridge/png.js";
 import { CONTENT_KEY_COLOR, MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
 import { MARKER_TOLERANCE } from "../types/protocol.js";
+import type { RgbColor } from "./color.js";
 import type { Bounds } from "../types/session.js";
 
 export interface MarkerCropResult {
@@ -10,16 +11,19 @@ export interface MarkerCropResult {
 	contentBounds: Bounds;
 }
 
+export interface CropToMarkerOptions {
+	/** The color the marker wrapper actually backed its content with (see `runCapture`'s `contentKeyColor` option); defaults to `CONTENT_KEY_COLOR`. */
+	contentKeyColor?: RgbColor;
+}
+
 function isMarkerColor(r: number, g: number, b: number): boolean {
 	return Math.abs(r - MARKER_COLOR.r) <= MARKER_TOLERANCE
 		&& Math.abs(g - MARKER_COLOR.g) <= MARKER_TOLERANCE
 		&& Math.abs(b - MARKER_COLOR.b) <= MARKER_TOLERANCE;
 }
 
-function isContentKeyColor(r: number, g: number, b: number): boolean {
-	return Math.abs(r - CONTENT_KEY_COLOR.r) <= MARKER_TOLERANCE
-		&& Math.abs(g - CONTENT_KEY_COLOR.g) <= MARKER_TOLERANCE
-		&& Math.abs(b - CONTENT_KEY_COLOR.b) <= MARKER_TOLERANCE;
+function isCloseToColor(r: number, g: number, b: number, color: RgbColor, tolerance: number): boolean {
+	return Math.abs(r - color.r) <= tolerance && Math.abs(g - color.g) <= tolerance && Math.abs(b - color.b) <= tolerance;
 }
 
 /**
@@ -30,10 +34,110 @@ function isContentKeyColor(r: number, g: number, b: number): boolean {
  * border color precisely so it never confuses the border measurement above, then gets restored to
  * transparent here rather than shipping as a visible solid-green fill in the final PNG.
  */
-function keyOutContentBackground(pixels: Buffer): void {
+function keyOutContentBackground(pixels: Buffer, contentKeyColor: RgbColor): void {
 	for (let offset = 0; offset < pixels.length; offset += 4) {
-		if (isContentKeyColor(pixels[offset], pixels[offset + 1], pixels[offset + 2])) pixels[offset + 3] = 0;
+		if (isCloseToColor(pixels[offset], pixels[offset + 1], pixels[offset + 2], contentKeyColor, MARKER_TOLERANCE)) pixels[offset + 3] = 0;
 	}
+}
+
+type Channel = "r" | "g" | "b";
+const CHANNELS: Channel[] = ["r", "g", "b"];
+
+/**
+ * Splits a color's three channels into those meaningfully above its own midpoint ("high") and at or
+ * below it ("low") - e.g. pure green (0, 255, 0) splits to high=[g], low=[r, b]. Used by
+ * {@link nibbleContentKeySpill} to measure, for any *arbitrary* chosen key color, how strongly a
+ * given pixel has been tinted toward it - not just green. A key color with no clear high/low split
+ * (a gray, or anything without at least one channel well separated from the others) can't be
+ * meaningfully spill-detected this way, so callers should skip the nibble pass entirely in that case
+ * (checked via the returned arrays' lengths) - the same real-world constraint any chroma-key color
+ * has: pick something vivid and unlike your actual content, not a neutral tone.
+ */
+function keySpillAxes(color: RgbColor): { high: Channel[]; low: Channel[] } {
+	const mid = (Math.max(color.r, color.g, color.b) + Math.min(color.r, color.g, color.b)) / 2;
+	const high = CHANNELS.filter((channel) => color[channel] > mid);
+	const low = CHANNELS.filter((channel) => color[channel] <= mid);
+	return { high, low };
+}
+
+function average(r: number, g: number, b: number, channels: Channel[]): number {
+	const values = { r, g, b };
+	return channels.reduce((sum, channel) => sum + values[channel], 0) / channels.length;
+}
+
+/** How far a pixel leans toward the key color's "high" channels over its "low" ones - see {@link keySpillAxes}. */
+function spillExcess(r: number, g: number, b: number, axes: { high: Channel[]; low: Channel[] }): number {
+	return average(r, g, b, axes.high) - average(r, g, b, axes.low);
+}
+
+/** Below this fraction of the key color's own excess, a pixel isn't considered spill-tinted enough to nibble. */
+const NIBBLE_THRESHOLD_RATIO = 0.05;
+/** A key color whose own high/low channel split is weaker than this can't be reliably spill-detected; skip nibbling. */
+const MIN_KEY_EXCESS = 64;
+/**
+ * A real anti-aliased fringe is only ever 1-2px wide; capping the erosion at a handful of rings
+ * bounds how far a mistaken nibble could ever eat into genuinely key-colored-looking real content,
+ * while still comfortably covering the fringe itself.
+ */
+const NIBBLE_ITERATIONS = 4;
+
+/**
+ * Erodes the cropped content's already-transparent holes outward, one ring of pixels at a time,
+ * removing any *still-opaque* pixel bordering a hole whose color leans toward the key color by more
+ * than a small fraction of the key color's own excess (see {@link spillExcess}) - i.e. "greenish"
+ * (for the default green key), not just "green". This catches Studio's own anti-aliasing at content
+ * edges, which blends the content's true color with the key-colored backing behind it (e.g. a pure
+ * `#00FF00` backing showing through a half-covered pixel as `#0DFF0D`, or through a mostly-opaque one
+ * as a barely-tinted `#BEECC7`) - {@link keyOutContentBackground}'s exact-match pass alone leaves
+ * exactly this kind of fringe visibly tinted in the final PNG. Runs after that exact-match pass, only
+ * ever touching pixels already adjacent to a hole, so real content far from any keyed-out pixel is
+ * never at risk regardless of its own color.
+ */
+function nibbleContentKeySpill(pixels: Buffer, width: number, height: number, contentKeyColor: RgbColor): void {
+	const axes = keySpillAxes(contentKeyColor);
+	if (axes.high.length === 0 || axes.low.length === 0) return;
+	const keyExcess = spillExcess(contentKeyColor.r, contentKeyColor.g, contentKeyColor.b, axes);
+	if (keyExcess < MIN_KEY_EXCESS) return;
+	const threshold = keyExcess * NIBBLE_THRESHOLD_RATIO;
+
+	const transparent = new Uint8Array(width * height);
+	for (let index = 0; index < width * height; index += 1) transparent[index] = pixels[index * 4 + 3] === 0 ? 1 : 0;
+
+	for (let iteration = 0; iteration < NIBBLE_ITERATIONS; iteration += 1) {
+		const toNibble: number[] = [];
+		for (let y = 0; y < height; y += 1) {
+			for (let x = 0; x < width; x += 1) {
+				const index = y * width + x;
+				if (transparent[index]) continue;
+				const hasTransparentNeighbor = (x > 0 && transparent[index - 1] === 1)
+					|| (x < width - 1 && transparent[index + 1] === 1)
+					|| (y > 0 && transparent[index - width] === 1)
+					|| (y < height - 1 && transparent[index + width] === 1);
+				if (!hasTransparentNeighbor) continue;
+				const offset = index * 4;
+				if (spillExcess(pixels[offset], pixels[offset + 1], pixels[offset + 2], axes) > threshold) toNibble.push(index);
+			}
+		}
+		if (toNibble.length === 0) break;
+		for (const index of toNibble) {
+			transparent[index] = 1;
+			pixels[index * 4 + 3] = 0;
+		}
+	}
+}
+
+/**
+ * The same spill test {@link nibbleContentKeySpill} uses internally, exposed for tests: true if a
+ * pixel leans toward `contentKeyColor` by more than the nibble threshold - i.e. it's tinted enough
+ * that, had it been adjacent to a hole during cropping, it would have been keyed out. A converged
+ * crop should have no such pixel left at any edge that started adjacent to one.
+ */
+export function isSpillTintedTowardKeyColor(r: number, g: number, b: number, contentKeyColor: RgbColor): boolean {
+	const axes = keySpillAxes(contentKeyColor);
+	if (axes.high.length === 0 || axes.low.length === 0) return false;
+	const keyExcess = spillExcess(contentKeyColor.r, contentKeyColor.g, contentKeyColor.b, axes);
+	if (keyExcess < MIN_KEY_EXCESS) return false;
+	return spillExcess(r, g, b, axes) > keyExcess * NIBBLE_THRESHOLD_RATIO;
 }
 
 const AMBIGUOUS_ERROR = "The marker border is incomplete, non-rectangular, or ambiguous";
@@ -144,7 +248,8 @@ function measureEdgeDepth(isMarker: Uint8Array, width: number, height: number, s
  * capture, along each edge independently, adapts to whatever the real content needs with no
  * per-edge cost beyond that.
  */
-export function cropToMarker(rawPng: Buffer): MarkerCropResult {
+export function cropToMarker(rawPng: Buffer, options: CropToMarkerOptions = {}): MarkerCropResult {
+	const contentKeyColor = options.contentKeyColor ?? CONTENT_KEY_COLOR;
 	const { width, height, pixels } = decodePng(rawPng);
 	const isMarker = new Uint8Array(width * height);
 	let minX = width, minY = height, maxX = -1, maxY = -1;
@@ -216,7 +321,8 @@ export function cropToMarker(rawPng: Buffer): MarkerCropResult {
 		const destOffset = row * contentBounds.width * 4;
 		pixels.copy(cropped, destOffset, sourceOffset, sourceOffset + contentBounds.width * 4);
 	}
-	keyOutContentBackground(cropped);
+	keyOutContentBackground(cropped, contentKeyColor);
+	nibbleContentKeySpill(cropped, contentBounds.width, contentBounds.height, contentKeyColor);
 
 	return { png: encodeRgba8Png(cropped, contentBounds.width, contentBounds.height), markerOuterBounds, contentBounds };
 }

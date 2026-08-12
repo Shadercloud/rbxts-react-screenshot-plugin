@@ -74,11 +74,27 @@ Four interchangeable styles — pick one per invocation:
 
 **On Windows, any prop value containing a space breaks `npm run <script> -- <args>`** — not a quoting issue, `npm`'s own argument reconstruction for `cmd.exe` mangles it, confirmed by hand. `SCREENSHOT_PROPS` is the one style confirmed to survive byte-for-byte, since environment variables are never re-parsed the way command-line arguments are. Plain `npm run screenshot <path>` / `npx react-screenshot-plugin <path>` with no extra flags is unaffected either way — the mangling only bites once you forward flags containing spaces through `npm run ... --`.
 
+## How cropping works
+
+The captured component is rendered inside an invisible marker: a solid-colored border frame around an opaque backing color directly behind your component. After capture, Node crops to the border's inner edge, then keys the backing color back out to transparency — including a "spill" pass that also removes faintly-tinted pixels at anti-aliased edges (Studio blends the backing color into the content's own edge pixels by a few percent even where your component fully covers them), not just exact matches.
+
+The backing color defaults to bright green (`#00FF00`) and is virtually never visible in the final PNG — but if your own component happens to use a similar green, override it:
+
+```powershell
+npx react-screenshot-plugin src/components/Button.tsx --content-key-color "#0000FF"
+```
+
+Accepts `#RRGGBB` or `RRGGBB`, with or without the leading `#`. Pick something vivid and unlike your component's own colors — a color close to gray/white/black can't be reliably keyed out (there's no dominant channel to detect spill from), and a color close to the border itself is rejected outright.
+
 ## Prerequisites
 
 - Windows, with Roblox Studio installed and HTTP requests enabled for it.
 - Your own roblox-ts project — its own `tsconfig.json`, `node_modules`, and `@rbxts/react`/`@rbxts/react-roblox`/`roblox-ts` installed (this package's `peerDependencies`).
 - A component module with a default (`export =`) export; props must be a plain JSON object.
+
+## Limitations
+
+- If you want to render semi-transparent UI components then you should wrap them in a solid background colored `<frame>`
 
 ## Development (working on this repository itself)
 

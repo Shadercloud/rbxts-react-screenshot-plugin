@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `react-screenshot-plugin <componentPath> [--props <json-object> | --props-file <path> | --<prop> <value>... | $env:SCREENSHOT_PROPS] [--output <path>]`
+ * `react-screenshot-plugin <componentPath> [--props <json-object> | --props-file <path> | --<prop> <value>... | $env:SCREENSHOT_PROPS] [--output <path>] [--content-key-color <hex>]`
  * `react-screenshot-plugin install-plugin` - one-time Studio-side setup; see `install-plugin.ts`.
  *
  * The shebang above is load-bearing on Windows, not just POSIX: npm's shim generator (`cmd-shim`)
@@ -16,6 +16,8 @@ import path from "node:path";
 
 import { installPlugin } from "./install-plugin.js";
 import { runCapture } from "./screenshot-command.js";
+import { parseHexColor } from "../capture/color.js";
+import type { RgbColor } from "../capture/color.js";
 import type { JsonObject, JsonValue } from "../types/protocol.js";
 
 export type Subcommand = "install-plugin" | "capture";
@@ -38,6 +40,7 @@ export interface ParsedArgs {
 	componentPath: string;
 	props: JsonObject;
 	outputPath?: string;
+	contentKeyColor?: RgbColor;
 }
 
 function resolveComponentPath(raw: string, cwd: string): string {
@@ -63,6 +66,7 @@ export function parseArgs(argv: string[], cwd: string, env: NodeJS.ProcessEnv = 
 	let propsRaw: string | undefined;
 	let propsFilePath: string | undefined;
 	let outputPath: string | undefined;
+	let contentKeyColor: RgbColor | undefined;
 	const adHocProps: JsonObject = {};
 	const adHocKeys = new Array<string>();
 
@@ -79,6 +83,11 @@ export function parseArgs(argv: string[], cwd: string, env: NodeJS.ProcessEnv = 
 		} else if (arg === "--output") {
 			outputPath = argv[i + 1];
 			if (outputPath === undefined) throw new Error("--output requires a path argument");
+			i += 1;
+		} else if (arg === "--content-key-color") {
+			const raw = argv[i + 1];
+			if (raw === undefined) throw new Error("--content-key-color requires a hex color argument, e.g. '#00FF00'");
+			contentKeyColor = parseHexColor(raw);
 			i += 1;
 		} else if (arg.startsWith("--")) {
 			// An individual prop flag, e.g. `--text "Save changes" --disabled false`. Each value is
@@ -104,7 +113,7 @@ export function parseArgs(argv: string[], cwd: string, env: NodeJS.ProcessEnv = 
 
 	if (!componentPath) {
 		throw new Error(
-			"Usage: npm run screenshot <componentPath> [--props <json-object> | --props-file <path> | --<prop> <value>... | $env:SCREENSHOT_PROPS] [--output <path>]",
+			"Usage: npm run screenshot <componentPath> [--props <json-object> | --props-file <path> | --<prop> <value>... | $env:SCREENSHOT_PROPS] [--output <path>] [--content-key-color <hex>]",
 		);
 	}
 	if (!componentPath.endsWith(".tsx")) throw new Error(`Component path must be a .tsx file: '${componentPath}'`);
@@ -141,7 +150,7 @@ export function parseArgs(argv: string[], cwd: string, env: NodeJS.ProcessEnv = 
 		props = parsePropsJson("SCREENSHOT_PROPS", envPropsRaw);
 	}
 
-	return { componentPath: resolveComponentPath(componentPath, cwd), props, outputPath };
+	return { componentPath: resolveComponentPath(componentPath, cwd), props, outputPath, contentKeyColor };
 }
 
 async function main(): Promise<void> {
@@ -169,7 +178,7 @@ async function main(): Promise<void> {
 	}
 
 	try {
-		const result = await runCapture({ componentPath: parsed.componentPath, props: parsed.props, outputPath: parsed.outputPath, cwd });
+		const result = await runCapture({ componentPath: parsed.componentPath, props: parsed.props, outputPath: parsed.outputPath, contentKeyColor: parsed.contentKeyColor, cwd });
 		console.log(`Saved ${result.width}x${result.height} screenshot to ${result.outputPath}`);
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));

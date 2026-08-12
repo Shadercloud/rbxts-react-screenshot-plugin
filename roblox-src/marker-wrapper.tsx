@@ -4,6 +4,8 @@ import { CONTENT_KEY_COLOR, MARKER_COLOR, MARKER_THICKNESS } from "./marker-cons
 
 interface MarkerWrapperProps {
 	children?: React.Element;
+	/** Overrides `CONTENT_KEY_COLOR`; embedded per capture by `src/compiler/component-entry.ts` so `--content-key-color` reaches this wrapper. */
+	contentKeyColor?: { r: number; g: number; b: number };
 }
 
 /**
@@ -14,6 +16,7 @@ interface MarkerWrapperProps {
  * out to transparency.
  */
 function MarkerWrapper(props: MarkerWrapperProps) {
+	const keyColor = props.contentKeyColor ?? CONTENT_KEY_COLOR;
 	return (
 		<frame
 			key="ScreenshotMarker"
@@ -33,7 +36,7 @@ function MarkerWrapper(props: MarkerWrapperProps) {
 				key="ScreenshotContent"
 				AutomaticSize={Enum.AutomaticSize.XY}
 				Size={UDim2.fromOffset(0, 0)}
-				BackgroundColor3={Color3.fromRGB(CONTENT_KEY_COLOR.r, CONTENT_KEY_COLOR.g, CONTENT_KEY_COLOR.b)}
+				BackgroundColor3={Color3.fromRGB(keyColor.r, keyColor.g, keyColor.b)}
 				BorderSizePixel={0}
 			>
 				{props.children}

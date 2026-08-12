@@ -33,6 +33,33 @@ test("--output sets the output path", () => {
 	assert.equal(parsed.outputPath, "out/result.png");
 });
 
+test("--content-key-color parses a hex color, with or without a leading '#'", () => {
+	const withHash = parseArgs(["Button.tsx", "--content-key-color", "#112233"], CWD);
+	assert.deepEqual(withHash.contentKeyColor, { r: 0x11, g: 0x22, b: 0x33 });
+	const withoutHash = parseArgs(["Button.tsx", "--content-key-color", "AABBCC"], CWD);
+	assert.deepEqual(withoutHash.contentKeyColor, { r: 0xaa, g: 0xbb, b: 0xcc });
+});
+
+test("contentKeyColor is undefined when --content-key-color is omitted", () => {
+	const parsed = parseArgs(["Button.tsx"], CWD);
+	assert.equal(parsed.contentKeyColor, undefined);
+});
+
+test("--content-key-color rejects a malformed hex value", () => {
+	assert.throws(() => parseArgs(["Button.tsx", "--content-key-color", "not-a-color"], CWD), /valid hex color/i);
+	assert.throws(() => parseArgs(["Button.tsx", "--content-key-color", "#FFF"], CWD), /valid hex color/i);
+});
+
+test("--content-key-color requires a value", () => {
+	assert.throws(() => parseArgs(["Button.tsx", "--content-key-color"], CWD), /requires a hex color argument/i);
+});
+
+test("--content-key-color can be combined freely with any props style", () => {
+	const parsed = parseArgs(["Button.tsx", "--content-key-color", "#00FF00", "--text", "Save"], CWD);
+	assert.deepEqual(parsed.contentKeyColor, { r: 0, g: 255, b: 0 });
+	assert.deepEqual(parsed.props, { text: "Save" });
+});
+
 test("invalid --props JSON is rejected", () => {
 	assert.throws(() => parseArgs(["Button.tsx", "--props", "{not json}"], CWD), /valid JSON/i);
 });

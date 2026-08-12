@@ -1,4 +1,6 @@
 /** Generates the temporary bootstrap module that mounts a captured component inside the marker wrapper. */
+import { CONTENT_KEY_COLOR } from "../../roblox-src/marker-constants.js";
+import type { RgbColor } from "../capture/color.js";
 import type { JsonObject } from "../types/protocol.js";
 
 export interface BootstrapSourceOptions {
@@ -8,6 +10,8 @@ export interface BootstrapSourceOptions {
 	markerWrapperImportPath: string;
 	props: JsonObject;
 	temporaryRootName: string;
+	/** Overrides the wrapper's default `CONTENT_KEY_COLOR`; defaults to it when omitted. */
+	contentKeyColor?: RgbColor;
 }
 
 /**
@@ -16,6 +20,8 @@ export interface BootstrapSourceOptions {
  */
 export function generateBootstrapSource(options: BootstrapSourceOptions): string {
 	const { componentImportPath, markerWrapperImportPath, props, temporaryRootName } = options;
+	const contentKeyColor = options.contentKeyColor ?? CONTENT_KEY_COLOR;
+	const markerWrapperProps = { contentKeyColor };
 	return [
 		'import React from "@rbxts/react";',
 		'import ReactRoblox from "@rbxts/react-roblox";',
@@ -32,7 +38,7 @@ export function generateBootstrapSource(options: BootstrapSourceOptions): string
 		"\tscreen.Parent = root;",
 		"",
 		"\tconst reactRoot = ReactRoblox.createRoot(screen);",
-		`\treactRoot.render(React.createElement(MarkerWrapper, {}, React.createElement(Component, ${JSON.stringify(props)})));`,
+		`\treactRoot.render(React.createElement(MarkerWrapper, ${JSON.stringify(markerWrapperProps)}, React.createElement(Component, ${JSON.stringify(props)})));`,
 		"\troot.Destroying.Connect(() => reactRoot.unmount());",
 		"\treturn root;",
 		"}",
