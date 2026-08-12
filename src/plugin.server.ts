@@ -100,6 +100,37 @@ function awaitViewportSize(screen: ScreenGui, timeoutSeconds = 10): Vector2 {
 }
 
 /**
+ * Waits for `instance`'s `AbsoluteSize` to stop changing across consecutive frames before returning
+ * it. Roblox's `AutomaticSize` layout for a cascade of several nested `AutomaticSize` frames (this
+ * plugin's own marker frames wrapping a real UI-kit component that is itself `AutomaticSize`, with
+ * its own icon+label pair arranged by a `UIListLayout`) doesn't necessarily converge to its final
+ * size in a single frame - each level's resize can trigger its parent's own re-layout on a LATER
+ * frame. Capturing before everything has settled is what produced "the marker border is incomplete"
+ * for sufficiently complex components: the marker's rendered pixels genuinely hadn't reached their
+ * final, self-consistent size yet, so its drawn border didn't line up with where the border actually
+ * ought to be. The Node-side crop step still measures (rather than assumes) the actual border depth
+ * per capture, absorbing whatever small amount of per-level rounding remains even once settled - this
+ * fixes the much larger, unbounded drift from capturing mid-convergence.
+ */
+function awaitStableSize(instance: GuiObject, timeoutSeconds = 10, requiredStableFrames = 5): Vector2 {
+	const deadline = os.clock() + timeoutSeconds;
+	let lastSize = instance.AbsoluteSize;
+	let stableFrames = 0;
+	while (os.clock() < deadline) {
+		task.wait();
+		const size = instance.AbsoluteSize;
+		if (size.X === lastSize.X && size.Y === lastSize.Y) {
+			stableFrames += 1;
+			if (stableFrames >= requiredStableFrames) return size;
+		} else {
+			stableFrames = 0;
+			lastSize = size;
+		}
+	}
+	error(`'${instance.Name}'s size never stabilized within ${timeoutSeconds}s (last seen ${math.floor(lastSize.X)}x${math.floor(lastSize.Y)})`);
+}
+
+/**
  * Confirms the marker frame fits within Studio's current viewport. If the captured component is
  * bigger than the visible viewport, its bottom/right edge renders off-screen entirely - the window
  * capture never sees it, and the Node-side crop step fails with an opaque "marker not found" or
@@ -107,10 +138,11 @@ function awaitViewportSize(screen: ScreenGui, timeoutSeconds = 10): Vector2 {
  * lets the failure name the real cause instead.
  */
 function checkFitsViewport(screen: ScreenGui): void {
-	const marker = screen.FindFirstChild("ScreenshotMarker", true);
-	if (!marker || !marker.IsA("GuiObject")) return;
+	const markerInstance = screen.FindFirstChild("ScreenshotMarker", true);
+	if (!markerInstance || !markerInstance.IsA("GuiObject")) return;
+	const marker: GuiObject = markerInstance;
 	const viewport = awaitViewportSize(screen);
-	const size = marker.AbsoluteSize;
+	const size = awaitStableSize(marker);
 	if (size.X > viewport.X || size.Y > viewport.Y) {
 		error(
 			`Captured element is ${math.floor(size.X)}x${math.floor(size.Y)}px, which is larger than Studio's ` +

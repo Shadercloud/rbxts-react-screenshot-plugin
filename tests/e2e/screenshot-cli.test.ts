@@ -108,7 +108,8 @@ test("capturing a component larger than Studio's viewport fails with a clear, sp
 // "The marker border is incomplete, non-rectangular, or ambiguous" when captured directly (no extra
 // wrapping frame around it in user code), because the cascade of nested AutomaticSize frames between
 // it and the marker's own border can round to a different pixel at each level - bleeding the content
-// into the marker's innermost border pixel by a pixel or two. Fixed by BORDER_SLACK in marker-crop.ts.
+// into the marker's innermost border pixel by a pixel or two. Fixed by cropToMarker measuring the
+// actual border depth per capture instead of assuming a fixed thickness (see marker-crop.ts).
 test("capturing an AutomaticSize-driven component directly (no wrapping frame) succeeds", { timeout: TEST_TIMEOUT_MS }, async (t) => {
 	const alreadyRunning = await findRunningStudioWindow();
 	if (!alreadyRunning && !(await findNewestStudioExecutable())) {
@@ -139,6 +140,52 @@ test("capturing an AutomaticSize-driven component directly (no wrapping frame) s
 
 	if (exitCode !== 0) {
 		assert.fail(`expected success capturing an AutomaticSize-driven component, got:\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
+	}
+
+	const png = await readFile(outputPath);
+	const decoded = decodePng(png);
+	assert.ok(decoded.width > 0 && decoded.height > 0, `expected a real, non-empty PNG, got ${decoded.width}x${decoded.height}`);
+
+	await rm(outputPath, { force: true });
+});
+
+// Regression test for a real reported follow-up bug: a component with a corner radius close to half
+// its own height (a "pill"-style button, e.g. a UI-kit Button with an extended theme corner radius)
+// used to fail marker detection the same way as ButtonLike.tsx, because a rounded UICorner leaves a
+// gap - near that corner, inside the content's own nominal bounding box - where the marker's own
+// background shows through, deeper than a fixed border-thickness constant ever assumed. See
+// tests/fixtures/components/ButtonLikeWithIcon.tsx's own doc comment, and marker-crop.ts's
+// measureEdgeDepth, which measures the actual per-edge depth per capture instead.
+test("capturing a component with a rounded ('pill') corner and an icon+text row succeeds", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+	const alreadyRunning = await findRunningStudioWindow();
+	if (!alreadyRunning && !(await findNewestStudioExecutable())) {
+		t.skip("Roblox Studio is not installed on this machine");
+		return;
+	}
+
+	const outputPath = path.join(REPO_ROOT, "tests", "fixtures", ".e2e-rounded-corner-output.png");
+	await rm(outputPath, { force: true });
+
+	const cliPath = path.join(REPO_ROOT, "dist", "src", "bridge", "screenshot-cli.js");
+	const child = spawn(
+		process.execPath,
+		[cliPath, "tests/fixtures/components/ButtonLikeWithIcon.tsx", "--output", outputPath],
+		{ cwd: REPO_ROOT },
+	);
+	t.signal.addEventListener("abort", () => child.kill());
+
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+	child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+	const exitCode = await new Promise<number>((resolve, reject) => {
+		child.once("error", reject);
+		child.once("exit", (code) => resolve(code ?? -1));
+	});
+
+	if (exitCode !== 0) {
+		assert.fail(`expected success capturing a rounded-corner component, got:\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
 	}
 
 	const png = await readFile(outputPath);

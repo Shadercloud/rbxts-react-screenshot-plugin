@@ -6,7 +6,9 @@ Package currently works on **WINDOWS** operating system only.
 
 ## Quick start
 
-### 1. Install
+### 1. Install 
+
+*Close down all Roblox Studio windows before installation*
 
 ```powershell
 npm install --save-dev @rbxts/react-screenshot-plugin

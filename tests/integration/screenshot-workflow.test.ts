@@ -4,13 +4,19 @@ import test from "node:test";
 
 import { runCapture } from "../../src/bridge/screenshot-command.js";
 import { encodeRgba8Png } from "../../src/bridge/png.js";
+import { MEASUREMENT_SAFETY_MARGIN } from "../../src/capture/marker-crop.js";
 import { MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
-import { BORDER_SLACK, PROTOCOL_VERSION } from "../../src/types/protocol.js";
+import { PROTOCOL_VERSION } from "../../src/types/protocol.js";
 import type { SessionManifest, SessionStatusResponse } from "../../src/types/protocol.js";
 
 const MARKER = [MARKER_COLOR.r, MARKER_COLOR.g, MARKER_COLOR.b];
-/** How much of the raw capture cropToMarker actually trims from each edge - see BORDER_SLACK's own doc comment. */
-const TRIM_THICKNESS = MARKER_THICKNESS + BORDER_SLACK;
+/**
+ * How much of the raw capture cropToMarker actually trims from each edge - for a plain, uniform
+ * border like buildRawCapture below draws, the measured depth is exactly MARKER_THICKNESS on every
+ * edge, plus cropToMarker's own fixed safety margin. See marker-crop.ts's own doc comment for why
+ * this is measured per capture rather than a second fixed constant.
+ */
+const TRIM_THICKNESS = MARKER_THICKNESS + MEASUREMENT_SAFETY_MARGIN;
 
 /** Builds a raw "window capture" PNG containing exactly one valid marker rectangle around solid content. */
 function buildRawCapture(width: number, height: number, contentColor: [number, number, number]): Buffer {

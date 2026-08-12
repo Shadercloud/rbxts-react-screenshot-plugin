@@ -11,18 +11,6 @@
  */
 export const MARKER_TOLERANCE = 8;
 
-/**
- * How many pixels of the innermost edge of `MARKER_THICKNESS`'s border band `marker-crop.ts` treats
- * as a tolerant transition zone (may be either marker-colored or content-colored) rather than
- * strictly requiring marker color. Wrapped content whose own size comes from a cascade of nested
- * `AutomaticSize` frames (see `roblox-src/marker-constants.ts`) can bleed into that innermost band by
- * a pixel or two due to per-level rounding; the remaining `MARKER_THICKNESS - BORDER_SLACK` pixels
- * are still checked with full strictness, so a genuinely incomplete/miscolored border still fails.
- * The final crop always trims the full `MARKER_THICKNESS` regardless, so this slack never lets a
- * marker-colored (or partially-bled) pixel leak into the output image.
- */
-export const BORDER_SLACK = 2;
-
 /** Name of the compiled ModuleScript the plugin requires to build the temporary capture root. */
 export const BOOTSTRAP_MODULE_NAME = "CaptureBootstrap";
 

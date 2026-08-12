@@ -1,14 +1,14 @@
 /**
- * Regenerates tests/fixtures/markers/*.png from the current MARKER_THICKNESS/BORDER_SLACK constants.
- * Run manually (`node scripts/generate-marker-fixtures.js`, after `npm run build:bridge`) whenever
- * those constants change - these are checked-in binary fixtures with no other source of truth, and
- * previously went silently stale against a hardcoded thickness assumption in the tests themselves.
+ * Regenerates tests/fixtures/markers/*.png from the current MARKER_THICKNESS constant and
+ * marker-crop.ts's adaptive-measurement algorithm. Run manually (`node scripts/generate-marker-fixtures.js`,
+ * after `npm run build:bridge`) whenever MARKER_THICKNESS or the measurement algorithm's constants
+ * change - these are checked-in binary fixtures with no other source of truth, and previously went
+ * silently stale against a hardcoded thickness assumption in the tests themselves.
  */
 const fs = require("node:fs");
 const path = require("node:path");
 const { encodeRgba8Png } = require(path.join(process.cwd(), "dist", "src", "bridge", "png.js"));
 const { MARKER_COLOR, MARKER_THICKNESS } = require(path.join(process.cwd(), "dist", "roblox-src", "marker-constants.js"));
-const { BORDER_SLACK } = require(path.join(process.cwd(), "dist", "src", "types", "protocol.js"));
 
 const CONTENT_COLOR = [10, 20, 30];
 const FIXTURES_DIR = path.join(process.cwd(), "tests", "fixtures", "markers");
@@ -56,15 +56,16 @@ writeFixture("valid.png", WIDTH, HEIGHT, (pixels) => drawValidMarker(pixels, WID
 // A border color shifted within MARKER_TOLERANCE (8) of MARKER_COLOR on every channel - still detected.
 writeFixture("color-shifted.png", WIDTH, HEIGHT, (pixels) => drawValidMarker(pixels, WIDTH, HEIGHT, [MARKER_COLOR.r - 6, MARKER_COLOR.g + 6, MARKER_COLOR.b - 6]));
 
-// An incomplete border: a gap punched through the middle of the top edge, well outside the tolerant
-// slack band (BORDER_SLACK pixels deep at the border/content boundary) - must still be rejected.
-writeFixture("incomplete.png", WIDTH, HEIGHT, (pixels) => {
+// A gap punched through the border that reaches all the way to the outer edge (row 0) - the
+// outermost pixel on those scan lines isn't marker-colored at all, which cropToMarker treats as an
+// unrecoverable hole in the border (depth 0), not something any amount of adaptive trim can absorb.
+writeFixture("edge-touching-gap.png", WIDTH, HEIGHT, (pixels) => {
 	drawValidMarker(pixels, WIDTH, HEIGHT);
-	const gapY = Math.max(0, MARKER_THICKNESS - BORDER_SLACK - 1);
-	fillRect(pixels, WIDTH, Math.floor(WIDTH / 2) - 3, gapY, Math.floor(WIDTH / 2) + 3, gapY, CONTENT_COLOR);
+	fillRect(pixels, WIDTH, Math.floor(WIDTH / 2) - 3, 0, Math.floor(WIDTH / 2) + 3, MARKER_THICKNESS - 1, CONTENT_COLOR);
 });
 
-// Two disjoint marker-colored rectangles on one canvas - rejected as ambiguous.
+// Two disjoint marker-colored rectangles on one canvas - rejected as ambiguous (fails the
+// single-connected-region check).
 const AMBIGUOUS_SIZE = 60;
 writeFixture("ambiguous.png", AMBIGUOUS_SIZE, AMBIGUOUS_SIZE, (pixels) => {
 	// First marker rectangle, top-left quadrant.
@@ -86,29 +87,28 @@ writeFixture("ambiguous.png", AMBIGUOUS_SIZE, AMBIGUOUS_SIZE, (pixels) => {
 	);
 });
 
-// A marker whose innermost BORDER_SLACK pixels are bled by content (tolerated) on one edge, and whose
-// content side has marker color bleeding BORDER_SLACK pixels back out (also tolerated) on another -
-// exercises the actual bug fix (AutomaticSize-cascade rounding bleed) at the unit level.
-writeFixture("slack-tolerated.png", WIDTH, HEIGHT, (pixels) => {
+// Regression coverage for the real reported bug: a rounded corner (UICorner) on the captured content
+// leaves a gap - near that corner, inside the content's own nominal bounding box - where the marker's
+// background shows through, deeper than MARKER_THICKNESS. Modeled here as a square notch at the
+// top-left corner (cruder than a real arc, but exercises the same "this edge's true depth is deeper
+// than MARKER_THICKNESS, only near one end of it" shape) extended CORNER_GAP_DEPTH beyond the normal
+// border. Must still crop successfully, with the wider measured depth applied to the whole top and
+// left edges (the crop is a rectangle - it can't follow the arc), leaving no marker pixel in the output.
+const CORNER_GAP_DEPTH = 6;
+writeFixture("rounded-corner.png", WIDTH, HEIGHT, (pixels) => {
 	drawValidMarker(pixels, WIDTH, HEIGHT);
-	// Innermost BORDER_SLACK rows of the top border become content-colored (content bleeding in).
-	for (let i = 0; i < BORDER_SLACK; i += 1) {
-		const y = MARKER_THICKNESS - 1 - i;
-		fillRect(pixels, WIDTH, MARKER_THICKNESS, y, WIDTH - 1 - MARKER_THICKNESS, y, CONTENT_COLOR);
-	}
-	// Outermost BORDER_SLACK rows of the left content area become marker-colored (marker bleeding out).
-	for (let i = 0; i < BORDER_SLACK; i += 1) {
-		const x = MARKER_THICKNESS + i;
-		fillRect(pixels, WIDTH, x, MARKER_THICKNESS, x, HEIGHT - 1 - MARKER_THICKNESS, [MARKER_COLOR.r, MARKER_COLOR.g, MARKER_COLOR.b]);
-	}
+	fillRect(
+		pixels, WIDTH,
+		MARKER_THICKNESS, MARKER_THICKNESS,
+		MARKER_THICKNESS + CORNER_GAP_DEPTH - 1, MARKER_THICKNESS + CORNER_GAP_DEPTH - 1,
+		[MARKER_COLOR.r, MARKER_COLOR.g, MARKER_COLOR.b],
+	);
 });
 
-// A marker contaminated ONE pixel beyond the tolerant slack band - must still be rejected, proving the
-// slack tolerance has a real, enforced limit rather than silently accepting arbitrarily bad borders.
-writeFixture("slack-exceeded.png", WIDTH, HEIGHT, (pixels) => {
-	drawValidMarker(pixels, WIDTH, HEIGHT);
-	for (let i = 0; i < BORDER_SLACK + 1; i += 1) {
-		const y = MARKER_THICKNESS - 1 - i;
-		fillRect(pixels, WIDTH, MARKER_THICKNESS, y, WIDTH - 1 - MARKER_THICKNESS, y, CONTENT_COLOR);
-	}
+// Content that is itself marker-colored, filling the entire canvas with no distinguishable border at
+// all - genuinely ambiguous (there's no way to tell where the border ends), and deep enough on every
+// edge to exceed cropToMarker's scan limit rather than merely its "no marker pixels found" check.
+const EXCEEDS_LIMIT_SIZE = MARKER_THICKNESS * 8 + 10;
+writeFixture("exceeds-scan-limit.png", EXCEEDS_LIMIT_SIZE, EXCEEDS_LIMIT_SIZE, (pixels) => {
+	fillRect(pixels, EXCEEDS_LIMIT_SIZE, 0, 0, EXCEEDS_LIMIT_SIZE - 1, EXCEEDS_LIMIT_SIZE - 1, [MARKER_COLOR.r, MARKER_COLOR.g, MARKER_COLOR.b]);
 });

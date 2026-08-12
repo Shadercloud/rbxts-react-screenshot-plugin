@@ -6,12 +6,11 @@
  */
 export const MARKER_COLOR = { r: 255, g: 0, b: 255 } as const;
 /**
- * Deliberately thicker than the minimum needed for a crisp border: components whose own size comes
- * from `AutomaticSize` (common for real UI-kit elements, e.g. a button that hugs its own label)
- * cascade through several nested `AutomaticSize` frames on the way to `roblox-src/marker-wrapper.tsx`'s
- * outer marker frame, and each level can round to a different pixel than the one below it. That
- * consistently bleeds the wrapped content into roughly the innermost pixel of the border - see
- * `src/capture/marker-crop.ts`'s `BORDER_SLACK`, which tolerates exactly that band without weakening
- * detection of a genuinely broken/miscolored border elsewhere.
+ * Nominal border thickness the wrapper renders. `src/capture/marker-crop.ts` doesn't trust this
+ * blindly when deciding how much to crop, though: it measures the actual rendered border depth per
+ * capture (which can run deeper than this in spots - e.g. a rounded corner on the captured content
+ * leaves a gap where the marker's background shows through near that corner, scaling with the
+ * corner's radius) and crops to what it measured. This constant mainly controls how crisp/thick the
+ * drawn border itself looks, plus the minimum plausible marker size sanity check.
  */
-export const MARKER_THICKNESS = 6;
+export const MARKER_THICKNESS = 12;
