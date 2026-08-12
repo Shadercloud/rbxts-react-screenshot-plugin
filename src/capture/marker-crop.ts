@@ -1,6 +1,6 @@
 /** Detects the marker border in a raw window capture and crops to its inner edges. */
 import { decodePng, encodeRgba8Png } from "../bridge/png.js";
-import { MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
+import { CONTENT_KEY_COLOR, MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
 import { MARKER_TOLERANCE } from "../types/protocol.js";
 import type { Bounds } from "../types/session.js";
 
@@ -14,6 +14,26 @@ function isMarkerColor(r: number, g: number, b: number): boolean {
 	return Math.abs(r - MARKER_COLOR.r) <= MARKER_TOLERANCE
 		&& Math.abs(g - MARKER_COLOR.g) <= MARKER_TOLERANCE
 		&& Math.abs(b - MARKER_COLOR.b) <= MARKER_TOLERANCE;
+}
+
+function isContentKeyColor(r: number, g: number, b: number): boolean {
+	return Math.abs(r - CONTENT_KEY_COLOR.r) <= MARKER_TOLERANCE
+		&& Math.abs(g - CONTENT_KEY_COLOR.g) <= MARKER_TOLERANCE
+		&& Math.abs(b - CONTENT_KEY_COLOR.b) <= MARKER_TOLERANCE;
+}
+
+/**
+ * Keys the opaque content-backing color (see `CONTENT_KEY_COLOR`'s own doc comment) back out to
+ * transparency, in place, after cropping: every pixel the captured component didn't itself paint -
+ * gaps around a rounded corner, spacing between an icon and a label, anywhere the component's own
+ * automatically-sized bounding box isn't fully covered - shows this color instead of the marker
+ * border color precisely so it never confuses the border measurement above, then gets restored to
+ * transparent here rather than shipping as a visible solid-green fill in the final PNG.
+ */
+function keyOutContentBackground(pixels: Buffer): void {
+	for (let offset = 0; offset < pixels.length; offset += 4) {
+		if (isContentKeyColor(pixels[offset], pixels[offset + 1], pixels[offset + 2])) pixels[offset + 3] = 0;
+	}
 }
 
 const AMBIGUOUS_ERROR = "The marker border is incomplete, non-rectangular, or ambiguous";
@@ -196,6 +216,7 @@ export function cropToMarker(rawPng: Buffer): MarkerCropResult {
 		const destOffset = row * contentBounds.width * 4;
 		pixels.copy(cropped, destOffset, sourceOffset, sourceOffset + contentBounds.width * 4);
 	}
+	keyOutContentBackground(cropped);
 
 	return { png: encodeRgba8Png(cropped, contentBounds.width, contentBounds.height), markerOuterBounds, contentBounds };
 }

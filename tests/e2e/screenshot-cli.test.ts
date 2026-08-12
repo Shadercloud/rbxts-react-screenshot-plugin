@@ -18,6 +18,24 @@ import test from "node:test";
 
 import { decodePng } from "../../src/bridge/png.js";
 import { findNewestStudioExecutable, findRunningStudioWindow } from "../../src/capture/studio-window.js";
+import { CONTENT_KEY_COLOR, MARKER_COLOR } from "../../roblox-src/marker-constants.js";
+import { MARKER_TOLERANCE } from "../../src/types/protocol.js";
+
+/**
+ * Confirms the final PNG contains no trace of either wrapper color: no marker-border color (it
+ * should have been fully cropped away) and no fully-opaque content-key color (it should have been
+ * keyed out to transparency by cropToMarker) - the actual regression signature of the "unwrapped
+ * component produces a mis-cropped/discolored PNG" bug, not just "some non-empty PNG came out".
+ */
+function assertNoWrapperColorLeaked(decoded: { width: number; height: number; pixels: Buffer }): void {
+	for (let i = 0; i < decoded.pixels.length; i += 4) {
+		const r = decoded.pixels[i], g = decoded.pixels[i + 1], b = decoded.pixels[i + 2], a = decoded.pixels[i + 3];
+		const isMarker = Math.abs(r - MARKER_COLOR.r) <= MARKER_TOLERANCE && Math.abs(g - MARKER_COLOR.g) <= MARKER_TOLERANCE && Math.abs(b - MARKER_COLOR.b) <= MARKER_TOLERANCE;
+		assert.ok(!isMarker, `found a marker-border-colored pixel at index ${i / 4} in the final PNG`);
+		const isOpaqueContentKey = a === 255 && Math.abs(r - CONTENT_KEY_COLOR.r) <= MARKER_TOLERANCE && Math.abs(g - CONTENT_KEY_COLOR.g) <= MARKER_TOLERANCE && Math.abs(b - CONTENT_KEY_COLOR.b) <= MARKER_TOLERANCE;
+		assert.ok(!isOpaqueContentKey, `found an un-keyed opaque content-backing-colored pixel at index ${i / 4} in the final PNG`);
+	}
+}
 
 // Not derived from __dirname: that resolves relative to the compiled file under dist/tests/e2e/,
 // not the source tree, and the two don't nest the same number of levels from the repo root.
@@ -145,6 +163,7 @@ test("capturing an AutomaticSize-driven component directly (no wrapping frame) s
 	const png = await readFile(outputPath);
 	const decoded = decodePng(png);
 	assert.ok(decoded.width > 0 && decoded.height > 0, `expected a real, non-empty PNG, got ${decoded.width}x${decoded.height}`);
+	assertNoWrapperColorLeaked(decoded);
 
 	await rm(outputPath, { force: true });
 });
@@ -191,6 +210,7 @@ test("capturing a component with a rounded ('pill') corner and an icon+text row 
 	const png = await readFile(outputPath);
 	const decoded = decodePng(png);
 	assert.ok(decoded.width > 0 && decoded.height > 0, `expected a real, non-empty PNG, got ${decoded.width}x${decoded.height}`);
+	assertNoWrapperColorLeaked(decoded);
 
 	await rm(outputPath, { force: true });
 });
