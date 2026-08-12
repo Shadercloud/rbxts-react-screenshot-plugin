@@ -2,7 +2,28 @@
   "name": "@rbxts/react-screenshot-plugin",
   "version": "0.1.0",
   "description": "Capture roblox-ts React components as PNGs through Roblox Studio",
+  "license": "MIT",
+  "author": "ShaderCloud",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shadercloud/rbxts-react-screenshot-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Shadercloud/rbxts-react-screenshot-plugin/issues"
+  },
+  "homepage": "https://github.com/Shadercloud/rbxts-react-screenshot-plugin#readme",
+  "keywords": [
+    "roblox",
+    "roblox-ts",
+    "rbxts",
+    "screenshot",
+    "react",
+    "studio-plugin"
+  ],
   "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "react-screenshot-plugin": "dist/src/bridge/screenshot-cli.js"
   },
