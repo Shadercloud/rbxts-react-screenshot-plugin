@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
+import type * as TS from "typescript";
 
 import { generateBootstrapSource } from "./component-entry.js";
+import { resolveNearestTsconfig } from "./tsconfig-resolution.js";
 import type { RgbColor } from "../capture/color.js";
 import { BOOTSTRAP_MODULE_NAME } from "../types/protocol.js";
 import type { JsonObject } from "../types/protocol.js";
@@ -88,6 +90,14 @@ export async function buildCaptureModel(
 	const modelPath = path.join(temporaryDirectory, "capture.rbxm");
 
 	try {
+		// Resolved from the consumer's own project (its `package.json`), not this package's own install
+		// location, so both the TypeScript compiler API below and the `rbxtsc` compile further down use
+		// the consumer's own installed versions - not this package's. `typescript` itself is only ever a
+		// devDependency of this package, never bundled for consumers, but every consumer already has it
+		// transitively via `roblox-ts`.
+		const consumerRequire = createRequire(path.join(projectRoot, "package.json"));
+		const ts = consumerRequire("typescript") as typeof TS;
+
 		// Stage only what compilation can actually need: this package's own self-contained
 		// `roblox-src/` (the marker wrapper and its own dependency-free constants module) from
 		// `packageRoot`, plus, if the target component lives outside the consumer project's top-level
@@ -122,6 +132,18 @@ export async function buildCaptureModel(
 		const entryTopLevelDir = relativeEntry.split(path.sep)[0];
 		const entryTopLevelSource = path.join(projectRoot, entryTopLevelDir);
 		await cp(path.join(entryTopLevelSource), path.join(stagedProject, entryTopLevelDir), { recursive: true, filter: filterOutNestedArtifacts(entryTopLevelSource) });
+
+		// The component's own nearest tsconfig.json (e.g. a Stories/tsconfig.json that maps its
+		// package's own name back to its `src/`, per a documented Rojo/consumer layout) may need
+		// directories staged beyond roblox-src/ and the entry's own top-level directory for its
+		// `paths` mappings to resolve. That nearest config is itself always already staged above -
+		// walking up from the entry file never leaves entryTopLevelDir before reaching projectRoot.
+		const { configPath: nearestConfigPath, extraStagingDirs } = resolveNearestTsconfig(ts, sourceEntry, projectRoot, ["roblox-src", entryTopLevelDir]);
+		for (const dir of extraStagingDirs) {
+			const source = path.join(projectRoot, dir);
+			await cp(source, path.join(stagedProject, dir), { recursive: true, filter: filterOutNestedArtifacts(source) });
+		}
+
 		await cp(path.join(projectRoot, "tsconfig.json"), path.join(stagedProject, "tsconfig.json"));
 		await cp(path.join(projectRoot, "package.json"), path.join(temporaryDirectory, "package.json"));
 		// Symlink the CONSUMER's own node_modules, not this package's - `@rbxts/react`/
@@ -142,7 +164,7 @@ export async function buildCaptureModel(
 		// project) rather than `packageRoot`, so the compile uses the consumer's own compiler options
 		// and their own installed `roblox-ts` version - not this package's.
 		await writeFile(tsconfigPath, JSON.stringify({
-			extends: path.join(stagedProject, "tsconfig.json"),
+			extends: path.join(stagedProject, path.relative(projectRoot, nearestConfigPath)),
 			compilerOptions: {
 				rootDir: stagedProject,
 				outDir: outputDirectory,
@@ -166,13 +188,11 @@ export async function buildCaptureModel(
 			},
 		}, undefined, 2));
 
-		// Resolved from the consumer's own project (its `package.json`, which was just copied into
-		// `temporaryDirectory` above), not from this package's own install location - so the compile
-		// uses the consumer's own installed `roblox-ts` version, not this package's, exactly as it
-		// already does for the consumer's own `tsconfig.json` above. On the local-development default
-		// path (no `consumerProjectRoot` override), `projectRoot` is this repository itself, so this
-		// still resolves this repository's own `roblox-ts`, unchanged from before.
-		const consumerRequire = createRequire(path.join(projectRoot, "package.json"));
+		// Resolved via the same consumerRequire created above - so the compile uses the consumer's own
+		// installed `roblox-ts` version, not this package's, exactly as it already does for the
+		// consumer's own `tsconfig.json` above. On the local-development default path (no
+		// `consumerProjectRoot` override), `projectRoot` is this repository itself, so this still
+		// resolves this repository's own `roblox-ts`, unchanged from before.
 		const compiler = consumerRequire.resolve("roblox-ts/out/CLI/cli.js");
 		await execute(process.execPath, [compiler, "-p", tsconfigPath, "--type", "model", "--rojo", rojoPath, "-i", includeDirectory], { cwd: temporaryDirectory });
 		for (const placeholder of placeholders) {

@@ -101,3 +101,14 @@ test("a hooks-using component in the external project compiles successfully agai
 	const { modelBuffer } = await buildCaptureModel("components/UsesHooks.tsx", {}, repoRoot, externalProjectRoot);
 	assert.ok(modelBuffer.length > 1_000);
 });
+
+test("a component whose nearest tsconfig.json maps a path alias outside its own top-level directory stages that directory too", async () => {
+	await inspectStaging("components/nested-config/UsesPathAlias.tsx", externalProjectRoot, (staged) => {
+		assert.ok(existsSync(path.join(staged.stagedProject, "lib", "index.tsx")));
+	});
+});
+
+test("a component that imports through a nested tsconfig.json's path alias (mirrors a Rojo-mapped package importing its own name) compiles successfully", async () => {
+	const { modelBuffer } = await buildCaptureModel("components/nested-config/UsesPathAlias.tsx", {}, repoRoot, externalProjectRoot);
+	assert.ok(modelBuffer.length > 1_000);
+});
