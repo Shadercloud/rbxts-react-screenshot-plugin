@@ -1,7 +1,7 @@
 /** Detects the marker border in a raw window capture and crops to its inner edges. */
 import { decodePng, encodeRgba8Png } from "../bridge/png.js";
 import { MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
-import { MARKER_TOLERANCE } from "../types/protocol.js";
+import { BORDER_SLACK, MARKER_TOLERANCE } from "../types/protocol.js";
 import type { Bounds } from "../types/session.js";
 
 export interface MarkerCropResult {
@@ -40,27 +40,43 @@ export function cropToMarker(rawPng: Buffer): MarkerCropResult {
 	}
 	if (maxX < 0) throw new Error("No marker border was found in the captured screenshot");
 
+	// The tolerant zone (see below) straddles the nominal border/content boundary on both sides, so
+	// the guaranteed-unambiguous interior only starts BORDER_SLACK pixels further in than
+	// MARKER_THICKNESS alone - trimming to that wider boundary, not just MARKER_THICKNESS, is what
+	// guarantees the final image can never contain a stray marker-colored (or ambiguously-bled) pixel.
+	const trimThickness = MARKER_THICKNESS + BORDER_SLACK;
 	const outerWidth = maxX - minX + 1;
 	const outerHeight = maxY - minY + 1;
-	if (outerWidth <= MARKER_THICKNESS * 2 || outerHeight <= MARKER_THICKNESS * 2) {
+	if (outerWidth <= trimThickness * 2 || outerHeight <= trimThickness * 2) {
 		throw new Error("The detected marker is too small to contain any content");
 	}
 
+	// Three zones, not two: the outer (MARKER_THICKNESS - BORDER_SLACK) pixels of the border band must
+	// be marker-colored (still catches a genuinely incomplete/non-rectangular/miscolored border), the
+	// following 2*BORDER_SLACK pixels straddling the nominal border/content boundary may be either
+	// color (tolerates AutomaticSize-cascade rounding bleed in either direction - see BORDER_SLACK's
+	// own doc comment), and the true interior beyond that must still never be marker-colored (still
+	// catches content that happens to use a marker-colored background).
+	const strictThickness = MARKER_THICKNESS - BORDER_SLACK;
 	for (let y = minY; y <= maxY; y += 1) {
 		for (let x = minX; x <= maxX; x += 1) {
-			const onBorder = x - minX < MARKER_THICKNESS || maxX - x < MARKER_THICKNESS || y - minY < MARKER_THICKNESS || maxY - y < MARKER_THICKNESS;
-			if (isMarker[y * width + x] === 1 !== onBorder) {
-				throw new Error("The marker border is incomplete, non-rectangular, or ambiguous");
+			const distanceFromOuterEdge = Math.min(x - minX, maxX - x, y - minY, maxY - y);
+			const marker = isMarker[y * width + x] === 1;
+			if (distanceFromOuterEdge < strictThickness) {
+				if (!marker) throw new Error("The marker border is incomplete, non-rectangular, or ambiguous");
+			} else if (distanceFromOuterEdge >= trimThickness) {
+				if (marker) throw new Error("The marker border is incomplete, non-rectangular, or ambiguous");
 			}
+			// else: within the tolerant band straddling the border/content boundary - either color is acceptable.
 		}
 	}
 
 	const markerOuterBounds: Bounds = { x: minX, y: minY, width: outerWidth, height: outerHeight };
 	const contentBounds: Bounds = {
-		x: minX + MARKER_THICKNESS,
-		y: minY + MARKER_THICKNESS,
-		width: outerWidth - MARKER_THICKNESS * 2,
-		height: outerHeight - MARKER_THICKNESS * 2,
+		x: minX + trimThickness,
+		y: minY + trimThickness,
+		width: outerWidth - trimThickness * 2,
+		height: outerHeight - trimThickness * 2,
 	};
 
 	const cropped = Buffer.alloc(contentBounds.width * contentBounds.height * 4);

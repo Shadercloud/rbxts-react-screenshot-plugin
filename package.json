@@ -1,6 +1,6 @@
 {
   "name": "@rbxts/react-screenshot-plugin",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Capture roblox-ts React components as PNGs through Roblox Studio",
   "license": "MIT",
   "author": "ShaderCloud",
@@ -63,9 +63,9 @@
   },
   "peerDependencies": {
     "@rbxts/compiler-types": "*",
-    "@rbxts/types": "*",
     "@rbxts/react": "^17.3.7-ts.2",
     "@rbxts/react-roblox": "^17.3.7-ts.2",
+    "@rbxts/types": "*",
     "roblox-ts": "^3.0.0"
   }
 }

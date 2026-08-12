@@ -101,3 +101,49 @@ test("capturing a component larger than Studio's viewport fails with a clear, sp
 
 	await rm(outputPath, { force: true });
 });
+
+// Regression test for a real reported bug: a component whose own size comes from AutomaticSize (a
+// UI-kit button hugging its own label, with UICorner/UIStroke/UIPadding/UIListLayout decorators - see
+// tests/fixtures/components/ButtonLike.tsx's own doc comment) used to fail marker detection with
+// "The marker border is incomplete, non-rectangular, or ambiguous" when captured directly (no extra
+// wrapping frame around it in user code), because the cascade of nested AutomaticSize frames between
+// it and the marker's own border can round to a different pixel at each level - bleeding the content
+// into the marker's innermost border pixel by a pixel or two. Fixed by BORDER_SLACK in marker-crop.ts.
+test("capturing an AutomaticSize-driven component directly (no wrapping frame) succeeds", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+	const alreadyRunning = await findRunningStudioWindow();
+	if (!alreadyRunning && !(await findNewestStudioExecutable())) {
+		t.skip("Roblox Studio is not installed on this machine");
+		return;
+	}
+
+	const outputPath = path.join(REPO_ROOT, "tests", "fixtures", ".e2e-automatic-size-output.png");
+	await rm(outputPath, { force: true });
+
+	const cliPath = path.join(REPO_ROOT, "dist", "src", "bridge", "screenshot-cli.js");
+	const child = spawn(
+		process.execPath,
+		[cliPath, "tests/fixtures/components/ButtonLike.tsx", "--output", outputPath],
+		{ cwd: REPO_ROOT },
+	);
+	t.signal.addEventListener("abort", () => child.kill());
+
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+	child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+
+	const exitCode = await new Promise<number>((resolve, reject) => {
+		child.once("error", reject);
+		child.once("exit", (code) => resolve(code ?? -1));
+	});
+
+	if (exitCode !== 0) {
+		assert.fail(`expected success capturing an AutomaticSize-driven component, got:\n--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`);
+	}
+
+	const png = await readFile(outputPath);
+	const decoded = decodePng(png);
+	assert.ok(decoded.width > 0 && decoded.height > 0, `expected a real, non-empty PNG, got ${decoded.width}x${decoded.height}`);
+
+	await rm(outputPath, { force: true });
+});

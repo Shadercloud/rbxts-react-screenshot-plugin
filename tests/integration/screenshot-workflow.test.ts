@@ -4,11 +4,13 @@ import test from "node:test";
 
 import { runCapture } from "../../src/bridge/screenshot-command.js";
 import { encodeRgba8Png } from "../../src/bridge/png.js";
-import { PROTOCOL_VERSION } from "../../src/types/protocol.js";
+import { MARKER_COLOR, MARKER_THICKNESS } from "../../roblox-src/marker-constants.js";
+import { BORDER_SLACK, PROTOCOL_VERSION } from "../../src/types/protocol.js";
 import type { SessionManifest, SessionStatusResponse } from "../../src/types/protocol.js";
 
-const MARKER_THICKNESS = 4;
-const MARKER = [255, 0, 255];
+const MARKER = [MARKER_COLOR.r, MARKER_COLOR.g, MARKER_COLOR.b];
+/** How much of the raw capture cropToMarker actually trims from each edge - see BORDER_SLACK's own doc comment. */
+const TRIM_THICKNESS = MARKER_THICKNESS + BORDER_SLACK;
 
 /** Builds a raw "window capture" PNG containing exactly one valid marker rectangle around solid content. */
 function buildRawCapture(width: number, height: number, contentColor: [number, number, number]): Buffer {
@@ -89,8 +91,8 @@ test("capturing a no-props component end to end produces a border-free PNG of th
 		})(),
 	]).then(([captureResult]) => captureResult);
 
-	assert.equal(result.width, rawWidth - MARKER_THICKNESS * 2);
-	assert.equal(result.height, rawHeight - MARKER_THICKNESS * 2);
+	assert.equal(result.width, rawWidth - TRIM_THICKNESS * 2);
+	assert.equal(result.height, rawHeight - TRIM_THICKNESS * 2);
 	assert.ok(result.outputPath.endsWith("tmp-no-props-output.png"));
 });
 
