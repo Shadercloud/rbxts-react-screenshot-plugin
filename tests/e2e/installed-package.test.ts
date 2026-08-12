@@ -28,7 +28,7 @@ import { pathToFileURL } from "node:url";
 
 import { decodePng } from "../../src/bridge/png.js";
 import { findNewestStudioExecutable, findRunningStudioWindow } from "../../src/capture/studio-window.js";
-import { installIntoFixture, installedCliPath, installedIndexPath, packThisPackage, runInstalledCli } from "./support/pack-install.js";
+import { installIntoFixture, installedCliPath, installedIndexPath, packThisPackage, runInstalledCli, runInstalledCliViaShim } from "./support/pack-install.js";
 import type { CaptureResult, DecodedPng, RunCaptureOptions } from "../../src/index.js";
 
 /** Shape of the installed package's programmatic entry point (`"main"`), imported dynamically from its real on-disk location rather than through a package specifier - our own test file's node_modules doesn't have this fixture's installed copy. */
@@ -77,6 +77,18 @@ test("the package works end to end as an installed dependency of an external pro
 	await t.test("install-plugin installs the bundled plugin with no rojo/build step", { timeout: CAPTURE_TIMEOUT_MS }, async (st) => {
 		const result = await runInstalledCli(PROJECT1, ["install-plugin"], { signal: st.signal });
 		assert.equal(result.exitCode, 0, describeFailure("install-plugin", result));
+		assert.match(result.stdout, /Installed Screenshot Plugin/);
+	});
+
+	// Regression test for a real bug that shipped in 0.1.0: a missing shebang on screenshot-cli.ts
+	// made npm's generated Windows .cmd shim try to execute the compiled .js file directly instead of
+	// via `node`, which Windows can't do - it popped "Select an App to Open this .js File" instead of
+	// running anything. `runInstalledCli` above (used by every other test in this file) calls `node
+	// <path>` directly and would never have caught this; this is the one test that goes through the
+	// actual shim npx / a package.json "screenshot" script resolves to.
+	await t.test("install-plugin works through npm's real Windows .cmd shim, not just direct node invocation", { timeout: CAPTURE_TIMEOUT_MS }, async (st) => {
+		const result = await runInstalledCliViaShim(PROJECT1, ["install-plugin"], { signal: st.signal });
+		assert.equal(result.exitCode, 0, describeFailure("install-plugin (via shim)", result));
 		assert.match(result.stdout, /Installed Screenshot Plugin/);
 	});
 

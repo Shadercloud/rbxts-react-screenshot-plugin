@@ -1,6 +1,15 @@
+#!/usr/bin/env node
 /**
  * `react-screenshot-plugin <componentPath> [--props <json-object> | --props-file <path> | --<prop> <value>... | $env:SCREENSHOT_PROPS] [--output <path>]`
  * `react-screenshot-plugin install-plugin` - one-time Studio-side setup; see `install-plugin.ts`.
+ *
+ * The shebang above is load-bearing on Windows, not just POSIX: npm's shim generator (`cmd-shim`)
+ * only prefixes the generated `.cmd`/`.ps1` wrapper with `node` when it detects a shebang on this
+ * file. Without one, the wrapper tries to execute this `.js` file directly, which Windows has no
+ * handler for - it pops "Select an App to Open this .js File" instead of running the CLI. Confirmed
+ * by inspecting the actual generated shim; this bug shipped in 0.1.0 undetected because every one of
+ * this repo's own e2e tests invokes the compiled CLI via `node <path>` directly, bypassing the shim
+ * entirely.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";

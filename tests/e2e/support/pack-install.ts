@@ -55,6 +55,11 @@ export function installedIndexPath(fixtureDir: string): string {
 	return path.join(fixtureDir, "node_modules", "@rbxts", "react-screenshot-plugin", "dist", "src", "index.js");
 }
 
+/** Path to npm's generated Windows `.cmd` shim for the installed package's `bin` entry. */
+export function installedCliShimPath(fixtureDir: string): string {
+	return path.join(fixtureDir, "node_modules", ".bin", "react-screenshot-plugin.cmd");
+}
+
 export interface CliRunResult {
 	exitCode: number;
 	stdout: string;
@@ -73,6 +78,33 @@ export function runInstalledCli(fixtureDir: string, args: string[], options: Run
 		const child = spawn(process.execPath, [installedCliPath(fixtureDir), ...args], {
 			cwd: fixtureDir,
 			env: { ...process.env, ...options.env },
+		});
+		options.signal?.addEventListener("abort", () => child.kill());
+
+		let stdout = "";
+		let stderr = "";
+		child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+		child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+		child.once("error", reject);
+		child.once("exit", (code) => resolve({ exitCode: code ?? -1, stdout, stderr }));
+	});
+}
+
+/**
+ * Runs the installed package through npm's actual generated Windows `.cmd` shim - the same
+ * resolution path `npx react-screenshot-plugin ...` and a `"screenshot": "react-screenshot-plugin"`
+ * package.json script both go through - rather than invoking the compiled `.js` file with `node`
+ * directly like `runInstalledCli` does. This is the only thing in this suite that actually exercises
+ * shim generation itself: a missing shebang in the source once made this specific path fail with
+ * Windows popping "Select an App to Open this .js File", while direct `node <path>` invocation (and
+ * so every other test here) stayed completely unaffected and green.
+ */
+export function runInstalledCliViaShim(fixtureDir: string, args: string[], options: RunInstalledCliOptions = {}): Promise<CliRunResult> {
+	return new Promise((resolve, reject) => {
+		const child = spawn(installedCliShimPath(fixtureDir), args, {
+			cwd: fixtureDir,
+			env: { ...process.env, ...options.env },
+			shell: true,
 		});
 		options.signal?.addEventListener("abort", () => child.kill());
 
